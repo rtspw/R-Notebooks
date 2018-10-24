@@ -1,0 +1,144 @@
+---
+title: "Market Basket - Bakery"
+output:
+  html_document:
+    df_print: paged
+---
+
+**Analysis of Bakery Purchases**
+
+We first import the necessary libraries for the market analysis.
+```{r echo=TRUE, message=FALSE, warning=FALSE, paged.print=FALSE}
+library(tidyverse)
+library(knitr)
+library(gridExtra)
+library(arules)
+library(arulesViz)
+```
+
+Using read.transactions() from the arules package, we can then create a class combining the transaction IDs and purchased item from the comma-separated data file. 
+```{r echo=TRUE, warning=FALSE}
+transactions <- read.transactions("./BreadBasket_DMS.csv",
+                                  format = "single",
+                                  cols = c(3,4),
+                                  sep = ",",
+                                  rm.duplicates = TRUE)
+```
+
+We can first check the general frequency of items purchased in general, without looking at their associations yet.
+```{r}
+itemFrequencyPlot(transactions,
+                  type = "absolute",
+                  topN = 15,
+                  xlab = "Frequency",
+                  horiz = T,
+                  lwd = 1,
+                  col = "blanchedAlmond")
+                  
+```
+
+We then use the apriori algorithm to get our rules. The function takes a support and confidence limit in a parameter list, pruning any rules that fall below that threshold per iteration. Target tells the function what type of association we want.
+```{r}
+parameterList <- list(support = 0.01, confidence = 0.5, target = "rules")
+rules <- apriori(transactions, parameter = parameterList)
+print(length(rules))
+```
+
+It is not yet clear what support and confidence threshold values we want for the best result, so we can try out many values and see what gives us a reasonable amount of meaningful rules. In the sample function above, we got 13 rules with a confidence of above 50%. We can use a for loop to try out different values and see how many meaningful rules we get:
+
+```{r include=FALSE}
+confidenceLevels <- seq(0.1, 0.9, by=0.1)
+
+ruleLengthForSupp10 <- integer(length = 9)
+ruleLengthForSupp5 <- integer(length = 9)
+ruleLengthForSupp1 <- integer(length = 9)
+ruleLengthForSupp0.5 <- integer(length = 9)
+
+for(i in 1:length(confidenceLevels)) {
+  parameterList <- list(support = 0.1, confidence = confidenceLevels[i], target = "rules")
+  rules <- apriori(transactions, parameter = parameterList)
+  ruleLengthForSupp10[i] <- length(rules)
+  
+  parameterList <- list(support = 0.05, confidence = confidenceLevels[i], target = "rules")
+  rules <- apriori(transactions, parameter = parameterList)
+  ruleLengthForSupp5[i] <- length(rules)
+  
+  parameterList <- list(support = 0.01, confidence = confidenceLevels[i], target = "rules")
+  rules <- apriori(transactions, parameter = parameterList)
+  ruleLengthForSupp1[i] <- length(rules)
+  
+  parameterList <- list(support = 0.005, confidence = confidenceLevels[i], target = "rules")
+  rules <- apriori(transactions, parameter = parameterList)
+  ruleLengthForSupp0.5[i] <- length(rules)
+}
+```
+
+We can look at our four new vectors, telling us the amount of rules found for each support and confidence level.
+```{r}
+plot10 <- qplot(confidenceLevels, ruleLengthForSupp10, 
+  xlab = "Confidence Level", main = "10% Support Level", geom = "blank") + 
+  geom_col(fill = c("#99FF33"), color = c("#006600")) + theme_bw() + 
+  scale_y_continuous(name = "Number of Rules", limits = c(0, 50))
+
+plot5 <- qplot(confidenceLevels, ruleLengthForSupp5, 
+  xlab = "Confidence Level", main = "5% Support Level", geom = "blank") + 
+  geom_col(fill = c("#39db4b"), color = c("#199627")) + theme_bw() + 
+  scale_y_continuous(name = "Number of Rules", limits = c(0, 50))
+
+plot1 <- qplot(confidenceLevels, ruleLengthForSupp1, 
+  xlab = "Confidence Level", main = "1% Support Level", geom = "blank") + 
+  geom_col(fill = c("#1accba"), color = c("#0e877a")) + theme_bw() + 
+  scale_y_continuous(name = "Number of Rules", limits = c(0, 50))
+
+plot0.5 <- qplot(confidenceLevels, ruleLengthForSupp0.5, 
+  xlab = "Confidence Level", main = "0.5% Support Level", geom = "blank") + 
+  geom_col(fill = c("#0e7ccc"), color = c("#055893")) + theme_bw() + 
+  scale_y_continuous(name = "Number of Rules", limits = c(0, 150))
+
+# Puts the four ggplot2 plots into a 2x2 grid
+grid.arrange(plot10, plot5, plot1, plot0.5, nrow = 2)
+```
+
+Now we can see the number of rules for each support level and confidence levels. A support level of 10% prunes too many rules, and 0.5% gives too many. We want a reasonable amount with a good confidence level, so we'll choose 1% and 50% confidence.
+
+```{r include=FALSE}
+parameterList <- list(support = 0.01, confidence = 0.5, target = "rules")
+rulesFinal <- apriori(transactions, parameter = parameterList)
+```
+
+```{r}
+inspect(rulesFinal)
+```
+
+Seems like a purchase with pretty much any pastry implies a purchase of coffee. Not too surprising considering people need a liquid to pair their breakfast with. 
+
+Support tells us what percent of purchases had a purchase with those pair of items. 
+Confidence tells us how often a purchase of the first item has actually been followed with a purchase of the second item.
+Lift tells us the ratio of the support of that rule to the support if both had no purchasing relationship with each other.
+
+We can see that Toast => Coffee has 73% confidence and 1.51 lift, making it one of the strongest connections. 
+
+Let's do a basic visualization:
+```{r}
+plot(rulesFinal, method = "graph")
+```
+
+The "arulesViz" allows us to use the default plot() function for our visualizations.
+
+We can also try another run with different arguments and see what rules we get.
+Let's try reducing our support threshold, allowing more obscure purchases in.
+```{r include=FALSE}
+parameterList <- list(support = 0.005, confidence = 0.5, target = "rules")
+rulesAlt <- apriori(transactions, parameter = parameterList)
+```
+
+```{r}
+inspect(rulesAlt)
+```
+
+```{r}
+plot(rulesAlt, method = "graph")
+```
+
+Now we have some sets including two items, such as { Cake, Hot Chocolate } => { Coffee }. 
+However, since our support threshold is so low, it's possible there are just outliars. 

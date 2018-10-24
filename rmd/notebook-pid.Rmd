@@ -1,0 +1,190 @@
+---
+title: "Pima Indians Diabetes Dataset"
+output:
+  html_document:
+    df_print: paged
+---
+
+### Viewing the Data
+
+First, let us import the data and view a summary of the data frame.
+```{r}
+diabetes_data <- read.csv('./diabetes.csv', header = TRUE)
+
+# Print simple summary for our data frame
+getSummary <- function(data) {
+  frameDim <- dim(data)
+  print(paste('Features: ', frameDim[2], ' | ', 'Entries: ', frameDim[1]))
+  print(str(diabetes_data))
+}
+
+getSummary(diabetes_data)
+```
+
+<br/ >
+
+#### Imputation
+
+I'll first check for any bad values in the data set
+```{r}
+apply(diabetes_data, 2, function(x) {
+  any(is.na(x))
+})
+```
+All the columns give false, meaning this data frame does not have any N/A values.
+
+However, it does seem that missing values are represented with a 0. Just for simplicity, I'm going to impute the values using the mean of the column.
+```{r}
+bloodPressure_mean <- round(mean(diabetes_data$BloodPressure[diabetes_data$BloodPressure != 0]))
+skinThickness_mean <- round(mean(diabetes_data$SkinThickness[diabetes_data$SkinThickness != 0]))
+insulin_mean <- round(mean(diabetes_data$Insulin[diabetes_data$Insulin != 0]))
+
+diabetes_data$BloodPressure[diabetes_data$BloodPressure == 0] <- bloodPressure_mean
+diabetes_data$SkinThickness[diabetes_data$SkinThickness == 0] <- skinThickness_mean
+diabetes_data$Insulin[diabetes_data$Insulin == 0] <- insulin_mean
+
+print(paste('Mean Blood Pressure:', bloodPressure_mean, '| Mean Skin Thickness:', 
+            skinThickness_mean, '| Mean Insulin:', insulin_mean), collapse = "")
+```
+
+<br/ >
+
+#### Correlation Matrix
+
+Next, I want to look at the correlation between the elements. 
+
+We first need to convert our data into a correlation matrix.
+```{r}
+diab_copy <- diabetes_data
+# Convert everything to numeric so we can use the cor() function
+diab_copy[, 1:5] <- lapply(diabetes_data[, 1:5], as.numeric)
+diab_copy[, 8:9] <- lapply(diabetes_data[, 8:9], as.numeric)
+
+corr_matrix <- diab_copy[, 1:9]
+corr_matrix <- round(cor(corr_matrix), 2)
+print(corr_matrix)
+```
+
+Now that we have a correlation matrix, I'll use the corrplot library to graph it, mainly as it seems relatively simple to use and conveys the information I want.
+```{r include=FALSE}
+library(corrplot)
+```
+```{r}
+# Convert to matrix as it is required by the corrplot library (it is currently a data frame)
+corrplot(as.matrix(corr_matrix), method = "square")
+```
+
+Not quite what I wanted. Some of the feature names are too long for the graph to look nice. 
+As a result, I'm going to shorten the column names just for this correlation matrix.
+```{r}
+for(i in  1:length(colnames(corr_matrix))) {
+  colnames(corr_matrix)[i] <- substr(colnames(corr_matrix)[i], 1, 1)
+}
+
+rownames(corr_matrix)[3] <- 'Blood Pressure'
+rownames(corr_matrix)[4] <- 'Skin Thickness'
+rownames(corr_matrix)[7] <- 'Diabetes Pedigree Function'
+
+corrplot(as.matrix(corr_matrix), 
+         method = "square",# Display correlation as squares of varying sizes
+         tl.col = 'black', # Color of labels
+         tl.srt = 0,       # Resets angle of column names to 0
+         tl.offset = 0.8)  # Vertically moves up column labels
+```
+
+That's better. 
+
+Just looking at the correlation plot, it seems that glucose is strongly correlated with diabetes, and will have a relatively strong effect in our classification tree. Not too surprising. 
+
+<br/ >
+
+---
+
+
+### Using Random Forests
+
+We should first subset the data into a training and testing set, usually a split of 70% to 30%. 
+Just to remove the small chance the order of the rows might be a factor, I'll sample the data first.
+```{r}
+set.seed(153)
+
+# Gives random vector of row numbers to select
+nRows <- dim(diabetes_data)[1]
+sampleIndexes <- sample(1:nRows, 0.7*nRows, replace = FALSE) 
+diabetes_data$Outcome <- as.factor(diabetes_data$Outcome)
+
+train <- diabetes_data[sampleIndexes, ]
+test <- diabetes_data[-sampleIndexes, ]
+
+dim(test)
+dim(train)
+```
+
+Next, let's run the random forest algorithm with the default arguments, and factoring in all features.
+```{r include=FALSE}
+library(randomForest)
+```
+```{r}
+form <- formula('Outcome ~ .')
+rfModel <- randomForest(form, data = train)
+prediction <- predict(rfModel, test[, 1:8])
+```
+
+We now know our prediction, but we can also try using a slightly different random forest algorithm in the party package for comparison.
+The ctree function is the party package also allows up to plot a sample tree, giving us a general idea of what the tree looks like.
+```{r include=FALSE}
+library(party)
+```
+```{r}
+partyRFModel <- ctree(form, data = train)
+altPrediction <- predict(partyRFModel, test[, 1:8])
+plot(partyRFModel, type = "simple")
+```
+
+Now, I want to add the predictions to the test data frame and compare the rows to see the accuracy of the model.
+```{r}
+test$Prediction1 <- prediction
+test$Prediction2 <- altPrediction
+
+testEql <- test[test$Outcome == test$Prediction1, ]
+altTestEql <- test[test$Outcome == test$Prediction2, ]
+
+rfAcc = dim(testEql)[1] / dim(test)[1]
+altRfAcc = dim(altTestEql)[1] / dim(test)[1]
+print(paste(c('Accuracy of RF Tree:', round(rfAcc, 3) * 100, '%'), collapse = " "))
+print(paste(c('Accuracy of Party RF Tree:', round(altRfAcc, 3) * 100, '%'), collapse = " "))
+```
+
+Seems we get about a 70-74% accuracy. Not the worst in the world. 
+
+Because I don't want to repeat code, I'm going to abstract the above code into a function.
+```{r}
+actualOutcome <- test$Outcome
+
+getAccuracyofRFModel <- function(formula, train, test, nTree = 500, mTry = sqrt(8)) {
+  rfModel <- randomForest(form, data = train, ntree = nTree, mtry =)
+  prediction <- predict(rfModel, test[, 1:8])
+  testEql <- test[test$Outcome == prediction, ]
+  rfAcc = dim(testEql)[1] / dim(test)[1]
+  return(round(rfAcc, 3))
+}
+
+```
+
+Now that we have a function, we can try different values of nTree and mTry to see what we get.
+```{r}
+nTreeVals <- c(5, 50, 100, 300, 500, 700, 1000)
+mTryVals <- c(1, 2, 3, 4, 5)
+for(ntree in nTreeVals) {
+  percent <- getAccuracyofRFModel(form, train, test, ntree, sqrt(8))
+  text <- paste(c(ntree, ': ', percent), collapse = ' ')
+  print(text)
+}
+for(mtry in mTryVals) {
+  percent <- getAccuracyofRFModel(form, train, test, 500, mtry)
+  text <- paste(c(mtry, ': ', percent), collapse = ' ')
+  print(text)
+}
+```
+
+The nTree value and mtry value doesn't seem to have an large effect on the accuracy.
