@@ -1,0 +1,163 @@
+---
+title: "Severe Injuries Mapping"
+output:
+  html_document:
+    df_print: paged
+---
+
+### Looking at the Data
+
+First, I'm going to import the data.
+```{r}
+injury_data <- read.csv('./severeinjury.csv', header = TRUE)
+colnames(injury_data)
+```
+```{r}
+paste(c('Number of entries:', nrow(injury_data)), collapse = ' ')
+```
+
+The first thing I notice is that there are a ton of features.  
+
+Some of them don't seem too useful for analysis, and are just there for entity integrity for whatever database this originally came from, such as ID numbers.
+
+I'm going to first prune some of the less useful columns.
+```{r include=FALSE}
+injury_data$ID <- NULL
+injury_data$UPA <- NULL
+injury_data$Address1 <- NULL
+injury_data$Address2 <- NULL
+injury_data$Inspection <- NULL
+injury_data$Primary.NAICS <- NULL
+injury_data$Final.Narrative <- NULL
+```
+
+### Map of States
+The data provides the latitude and longitude of each injury. 
+
+From a quick search, the two main libraries for rendering maps in R include **ggmap** and **rworldmap**. 
+
+**ggmap** uses an image raster taken from google maps or whatever source is avaliable. However, as the api it pulls from now blocks requests without a special api key, I'll use **rworldmap** for now. 
+```{r include=FALSE}
+library(rworldmap)
+```
+```{r}
+map <- getMap(resolution = 'high')
+plot(map, xlim = c(-120, -72), ylim = c(20, 50), asp = 1)
+points(injury_data$Longitude, injury_data$Latitude, col = rgb(0.6, 0.1, 0.2), cex = 0.1)
+```
+
+I thought the map would simply look more like a population map of the states, as of most graphs of this type, but it actually seems fairly spread out through the states. 
+
+The first thing I see is the concentration of injuries on the East coast and lack thereof on the West. There is also a huge gap between the New England states and the Southern states where there is a significant decrease in injuries. My first intuition tells me that this is a result of the types of industry at each location. 
+
+I did ignore the states and territories outside the central block, so let me graph that too.
+```{r}
+map_hawaii <- getMap(resolution = 'low')
+plot(map_hawaii, xlim = c(-160, -155), ylim = c(18, 23), asp = 1)
+points(injury_data$Longitude, injury_data$Latitude, col = rgb(0.6, 0.1, 0.2), cex = 1)
+hawaii_plot <- recordPlot('rworldmap')
+```
+
+```{r}
+map_alaska <- getMap(resolution = 'high')
+alaska_plot <- plot(map_alaska, xlim = c(-172, -130), ylim = c(52, 72), asp = 1.4)
+points(injury_data$Longitude, injury_data$Latitude, col = rgb(0.6, 0.1, 0.2), cex = 5)
+```
+
+I had to bloat up the dot sizes for Alaska due to the small number of injuries.
+
+One immediate downside of the vanilla plot function that I see is that the function does not return some sort of object which could allow me to reuse it for later, but besides inconvenience it's not a huge deal.
+
+</br >
+
+---
+
+### Most Dangerous Locations and Companies
+
+Next I want to see which locations have the most dangerous workplaces. From the previous map, we can assume one of the top locations will be Texas, considering its still crowded dot density over such a large land mass. 
+
+We can use the default order() function to sort our data.frame by a specific row.
+```{r}
+# Gets table with each state tied to the amount of time is shows up 
+injury_by_state <- table(injury_data$State)
+
+# Sorts the table by value
+injury_by_state <- injury_by_state[order(injury_by_state, decreasing = TRUE)]
+
+# Only get first ten entities
+injury_by_state_head <- head(injury_by_state, n = 10)
+
+# Convert to data.frame
+injury_by_state_head <- as.data.frame(injury_by_state_head)
+
+colnames(injury_by_state_head) <- c('State', 'Freq')
+
+print(injury_by_state_head)
+```
+
+Turns out my guess was right. Texas seems to be one of the more dangerous states to work, followed by Florida.
+
+Let me put this in a bar graph so it's easier to look at.
+
+```{r include=FALSE}
+library(ggplot2)
+```
+```{r}
+state_plot <- ggplot(data = injury_by_state_head, aes(x = State, y = Freq)) +
+  geom_bar(stat = 'identity', fill = rgb(0.2, 0.85, 0.3), width = 0.75) +
+  theme_minimal() +
+  geom_text(aes(label = Freq), size = 3.5, hjust = 1.3, 
+            fontface = 'bold', colour = 'white', vjust = .4) +
+  coord_flip()
+state_plot
+```
+
+I want to do the same for both companies and cities. First I'll make a function to abstract the process.
+```{r include=FALSE}
+sortAndGraph <- function(column, name, color) {
+  # Convert column to table
+  injury_by_col <- table(column)
+  
+  # Sorts the table by value
+  injury_by_col <- injury_by_col[order(injury_by_col, decreasing = TRUE)]
+  
+  # Only get first ten entities
+  injury_by_col_head <- head(injury_by_col, n = 10)
+  
+  # Convert to data.frame
+  injury_by_col_head <- as.data.frame(injury_by_col_head)
+  
+  # Name columns in data.frame
+  colnames(injury_by_col_head) <- c(name, 'Freq')
+  
+  state_plot <- ggplot(data = injury_by_col_head, aes_string(x = name, y = 'Freq')) +
+    geom_bar(stat = 'identity', fill = color, width = 0.75) +
+    theme_minimal() +
+    geom_text(aes(label = Freq), size = 3.5, hjust = 1.3, 
+            fontface = 'bold', colour = 'white', vjust = .4) +
+    coord_flip()
+  
+  return(state_plot)
+}
+```
+```{r}
+city_plot <- sortAndGraph(injury_data$City, 'City', rgb(0.6, 0.5, 0.7))
+employer_plot <- sortAndGraph(injury_data$Employer, 'Employer', rgb(1, 0.5, 0.7))
+```
+```{r include=FALSE}
+library(gridExtra)
+```
+```{r}
+layout <- rbind(c(1,2), c(1,3))
+grid.arrange(state_plot, city_plot, employer_plot, ncol = 2, layout_matrix = layout)
+```
+
+Working at the US Postal Service is apparently so dangerous, it shows up 5 times in our company chart.
+Seems like the data isn't perfectly cleaned though which is a bit problematic. I'm not entirely sure how to deal with this yet in an automated process, so I'll just conclude that working in the mail delivery industry is quite dangerous.
+
+Finally, I'll look at the main causes of injury. 
+```{r}
+sortAndGraph(injury_data$EventTitle, 'Event', rgb(0.1, 0.3, 0.67))
+```
+
+Looks painful. Seeing how being caught in running equipment is the predominant cause of injury, I can see how the mailing industry, where the mail is mainly sorted and distributed with automated machinery, can be such a dangerous industry.
