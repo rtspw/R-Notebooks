@@ -46,7 +46,33 @@ print(length(rules))
 
 It is not yet clear what support and confidence threshold values we want for the best result, so we can try out many values and see what gives us a reasonable amount of meaningful rules. In the sample function above, we got 13 rules with a confidence of above 50%. We can use a for loop to try out different values and see how many meaningful rules we get:
 
-```{r include=FALSE}
+```{r message=FALSE, warning=FALSE, eval = FALSE}
+confidenceLevels <- seq(0.1, 0.9, by=0.1)
+
+ruleLengthForSupp10 <- integer(length = 9)
+ruleLengthForSupp5 <- integer(length = 9)
+ruleLengthForSupp1 <- integer(length = 9)
+ruleLengthForSupp0.5 <- integer(length = 9)
+
+for(i in 1:length(confidenceLevels)) {
+  parameterList <- list(support = 0.1, confidence = confidenceLevels[i], target = "rules")
+  rules <- apriori(transactions, parameter = parameterList)
+  ruleLengthForSupp10[i] <- length(rules)
+  
+  parameterList <- list(support = 0.05, confidence = confidenceLevels[i], target = "rules")
+  rules <- apriori(transactions, parameter = parameterList)
+  ruleLengthForSupp5[i] <- length(rules)
+  
+  parameterList <- list(support = 0.01, confidence = confidenceLevels[i], target = "rules")
+  rules <- apriori(transactions, parameter = parameterList)
+  ruleLengthForSupp1[i] <- length(rules)
+  
+  parameterList <- list(support = 0.005, confidence = confidenceLevels[i], target = "rules")
+  rules <- apriori(transactions, parameter = parameterList)
+  ruleLengthForSupp0.5[i] <- length(rules)
+}
+```
+```{r message=FALSE, warning=FALSE, include=FALSE}
 confidenceLevels <- seq(0.1, 0.9, by=0.1)
 
 ruleLengthForSupp10 <- integer(length = 9)
@@ -101,7 +127,7 @@ grid.arrange(plot10, plot5, plot1, plot0.5, nrow = 2)
 
 Now we can see the number of rules for each support level and confidence levels. A support level of 10% prunes too many rules, and 0.5% gives too many. We want a reasonable amount with a good confidence level, so we'll choose 1% and 50% confidence.
 
-```{r include=FALSE}
+```{r}
 parameterList <- list(support = 0.01, confidence = 0.5, target = "rules")
 rulesFinal <- apriori(transactions, parameter = parameterList)
 ```
@@ -127,11 +153,14 @@ The "arulesViz" allows us to use the default plot() function for our visualizati
 
 We can also try another run with different arguments and see what rules we get.
 Let's try reducing our support threshold, allowing more obscure purchases in.
-```{r include=FALSE}
+```{r echo=TRUE, message=FALSE, warning=FALSE, eval = FALSE}
 parameterList <- list(support = 0.005, confidence = 0.5, target = "rules")
 rulesAlt <- apriori(transactions, parameter = parameterList)
 ```
-
+```{r message=FALSE, warning=FALSE, include=FALSE}
+parameterList <- list(support = 0.005, confidence = 0.5, target = "rules")
+rulesAlt <- apriori(transactions, parameter = parameterList)
+```
 ```{r}
 inspect(rulesAlt)
 ```

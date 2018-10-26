@@ -1,0 +1,220 @@
+---
+title: "Spam Classifier Using Naive Bayes"
+output:
+  html_document:
+    df_print: paged
+---
+
+### Quick Overview
+
+The Naive Bayes Classifier is a fairly simple application of the Bayes Theorem.
+It works best for data where each feature is independent, which is why it is commonly used for applications such as text processing.
+
+What I plan to do is to tokenize the sms text and use the Naive Bayes classifier to train a model that will determine whether future texts are spam or not. 
+
+```{r}
+sms_data <- read.csv('./spam.csv', colClasses = c('factor', 'character'))
+sms_data$X <- NULL
+sms_data$X.1 <- NULL
+sms_data$X.2 <- NULL
+colnames(sms_data) <- c('Class', 'Text')
+```
+
+We ignore the last three columns there are an insignificant amount of entries in them.
+
+Next, I want to visualize the amount of spam and ham emails that are in the dataset.
+```{r echo=TRUE, message=FALSE, warning=FALSE, paged.print=FALSE}
+library(ggplot2)
+```
+```{r}
+class_table <- table(sms_data$Class)
+class_table_df <- as.data.frame(class_table)
+colnames(class_table_df) <- c('Class', 'Freq')
+ggplot(class_table_df, aes(x = Class, y = Freq)) + 
+  geom_bar(stat = 'identity', width = 0.5, fill = rgb(0.1, 0.3, 0.4)) +
+  geom_text(aes(label = Freq), color = 'white', vjust = 2) +
+  theme_minimal()
+```
+
+What other meta-features of the text can we get before looking at each word individually?
+
+I want to see the length of the text, as I have a feeling longer messages will be more likely to be spam.
+```{r}
+sms_length <- data.frame('class' = sms_data$Class, 'length' = nchar(sms_data$Text))
+head(sms_length)
+```
+
+Now I'll plot it in a histogram and see what sort of structure we get.
+```{r}
+sms_length_spam <- sms_length[sms_length$class == 'spam',]
+sms_length_ham <- sms_length[sms_length$class == 'ham',]
+ggplot(data = sms_length, aes(x = length)) + 
+  geom_histogram(bins = 250, fill = rgb(0.9, 0.9, 0.9)) + 
+  geom_histogram(data = sms_length_ham, bins = 250, fill = rgb(0.4, 0.3, 0.6), alpha = 0.9) + 
+  geom_histogram(data = sms_length_spam, bins = 250, fill = rgb(0.1, 0.7, 0.6), alpha = 0.9) + 
+  scale_fill_manual(name = 'classes', values = c(rgb(0.4, 0.3, 0.6), rgb(0.1, 0.7, 0.6)), labels = c('Ham', 'Spam')) + 
+  theme_minimal()
+```
+
+It seems like the length of ham messages tend to be less than 100 characters, while the spam messages aggregate at about 175 characters. (There are also some absurdly long ham messages for some reason).
+
+</br >
+
+#### Tokenizing the Messages
+
+Tokenizing strings is a common practice across computer languages. That is, to split a string into small string tokens using some delimiter character, and putting it into an array.
+
+In order to prepare the data for the Naive Bayes Classifier, I have to separate each word into its own word-class pair. 
+
+
+Luckily, R provides several libraries to help with cleaning strings.
+The standard for this sort of classification is also to use a Document Term Matrix to store our string tokens, which will also store the frequency of each word.
+```{r message=FALSE, warning=FALSE}
+library(tm)
+library(SnowballC)
+```
+```{r}
+sms_docs <- Corpus(VectorSource(sms_data$Text))
+inspect(sms_docs[1:3])
+```
+
+</br >
+
+TM also provide mapping functions which can intelligently remove elements such as numbers, punctuations, and so on.
+```{r message=FALSE, warning=FALSE}
+# Convert to lowercase so "Hi" and "hi" are considered the same
+sms_docs_modified <- tm_map(sms_docs, tolower)
+# Remove periods and commas
+sms_docs_modified <- tm_map(sms_docs_modified, removePunctuation)
+# Numbers are meaningless here by themselves
+sms_docs_modified <- tm_map(sms_docs_modified, removeNumbers)
+# Remove words specified by the stopword() function, including words like "and", "as", etc.
+sms_docs_modified <- tm_map(sms_docs_modified, removeWords, stopwords())
+# Remove excessive whitespace
+sms_docs_modified <- tm_map(sms_docs_modified, stripWhitespace)
+
+inspect(sms_docs_modified[1:3])
+```
+
+</br >
+
+Now I'll store the documents into a Document Term Matrix.
+```{r}
+doc_matrix <- DocumentTermMatrix(sms_docs_modified)
+str(doc_matrix)
+```
+
+</br >
+
+#### Subsetting the Data
+
+Now I'm going to split the matricies into the training and test set. I'm going to use the same method I used in the Diabetes data set: using the sample method. Just like usual, I'll split it into 70/30 for the training and test set respectively.
+
+```{r}
+nRows <- nrow(sms_data)
+sampleIndexes <- sample(1:nRows, 0.7 * nRows, replace = FALSE)
+sms_data_train <- sms_data[sampleIndexes, ]
+sms_data_test <- sms_data[-sampleIndexes, ]
+doc_matrix_train <- doc_matrix[sampleIndexes, ]
+doc_matrix_test <- doc_matrix[-sampleIndexes, ]
+sms_docs_train <- sms_docs_modified[sampleIndexes]
+sms_docs_test <- sms_docs_modified[-sampleIndexes]
+```
+
+
+</br >
+
+#### Cleaning up the Tokens
+
+Now we have an object with a whole ton of features. A bit too many actually. 43958 unique words is not much in terms of computers, but we can still clean up the data a bit.
+
+I want to remove rare words and focus on the ones that show up often in messages.
+
+```{r}
+# This function only returns the words that appear in n messages
+frequent_words <- findFreqTerms(doc_matrix_train, 5)
+head(frequent_words, n = 20)
+```
+
+</br >
+
+Now we can store this new set into a reduced matrix by using a dictionary filter.
+```{r}
+reduced_doc_matrix_train <- DocumentTermMatrix(sms_docs_train, list(dictionary = frequent_words))
+reduced_doc_matrix_test <- DocumentTermMatrix(sms_docs_test, list(dictionary = frequent_words))
+str(reduced_doc_matrix_train)
+```
+
+</br >
+
+Finally, the DocumentTermMatrix is incompatiable with the Naive Bayes Classifier we'll be using, as it takes factors only. I'm going to borrow some code which can help turn our binary numbers into a factor vector.
+```{r}
+convert_to_factor <- function(x) {
+  x = ifelse(x > 0, 1, 0)
+  x = factor(x, levels = c(0, 1), labels=c("No", "Yes"))
+  return(x)
+}
+
+reduced_doc_matrix_train = apply(reduced_doc_matrix_train, 2, convert_to_factor)
+reduced_doc_matrix_test  = apply(reduced_doc_matrix_test, 2, convert_to_factor)
+```
+
+
+</br >
+
+#### Performing the Classification
+
+First I'll import "e1071" which contains many common classification algorithms including Naive Bayes.
+```{r message=FALSE, warning=FALSE}
+library(e1071)
+library(tidytext)
+```
+```{r}
+classifier <- naiveBayes(reduced_doc_matrix_train, sms_data_train$Class)
+prediction <- predict(classifier, reduced_doc_matrix_test)
+table(prediction)
+```
+
+</br >
+
+Let's look at the accuracy of our classifier:
+```{r}
+results_df <- data.frame('Expected' = sms_data_test$Class, 'Actual' = prediction)
+head(results_df, n = 20)
+```
+
+</br >
+
+Looking good so far. Let's find the accuracy of our classifier.
+```{r}
+correct_results <- results_df[results_df$Expected == results_df$Actual,]
+incorrect_results <- results_df[results_df$Expected != results_df$Actual,]
+accuracy <- round(nrow(correct_results) / nrow(results_df) * 100, 2)
+paste(c('Accuracy: ', accuracy, '%'), collapse = '')
+```
+
+</br >
+
+That's pretty good. However, that's still 32 messages being classified wrong. Let's look at which ones were incorrect:
+```{r}
+table(incorrect_results)
+```
+
+</br >
+
+6 Ham messages were classified as spam, which is not great. Likewise, 26 spam messages got through, although that isn't as big of a deal.
+
+It's possible some *zero frequencies* are getting through into our classifier and hurting its accuracy. Luckily, the naiveBayes functions has laplace smoothing built in, so we can perhaps improve the results a bit. 
+```{r}
+classifier_the_sequel <- naiveBayes(reduced_doc_matrix_train, sms_data_train$Class, laplace = 1)
+prediction_ts <- predict(classifier_the_sequel, reduced_doc_matrix_test)
+results_df_ts <- data.frame('Expected' = sms_data_test$Class, 'Actual' = prediction_ts)
+correct_results_ts <- results_df_ts[results_df_ts$Expected == results_df_ts$Actual,]
+incorrect_results_ts <- results_df_ts[results_df_ts$Expected != results_df_ts$Actual,]
+accuracy_ts <- round(nrow(correct_results_ts) / nrow(results_df_ts) * 100, 2)
+paste(c('Accuracy: ', accuracy_ts, '%'), collapse = '')
+```
+
+</br >
+
+Well I said it was possible but I guess this didn't change much.

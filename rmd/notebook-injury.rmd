@@ -21,7 +21,7 @@ The first thing I notice is that there are a ton of features.
 Some of them don't seem too useful for analysis, and are just there for entity integrity for whatever database this originally came from, such as ID numbers.
 
 I'm going to first prune some of the less useful columns.
-```{r include=FALSE}
+```{r}
 injury_data$ID <- NULL
 injury_data$UPA <- NULL
 injury_data$Address1 <- NULL
@@ -37,7 +37,7 @@ The data provides the latitude and longitude of each injury.
 From a quick search, the two main libraries for rendering maps in R include **ggmap** and **rworldmap**. 
 
 **ggmap** uses an image raster taken from google maps or whatever source is avaliable. However, as the api it pulls from now blocks requests without a special api key, I'll use **rworldmap** for now. 
-```{r include=FALSE}
+```{r message=FALSE, warning=FALSE}
 library(rworldmap)
 ```
 ```{r}
@@ -99,7 +99,7 @@ Turns out my guess was right. Texas seems to be one of the more dangerous states
 
 Let me put this in a bar graph so it's easier to look at.
 
-```{r include=FALSE}
+```{r message=FALSE, warning=FALSE}
 library(ggplot2)
 ```
 ```{r}
@@ -113,7 +113,7 @@ state_plot
 ```
 
 I want to do the same for both companies and cities. First I'll make a function to abstract the process.
-```{r include=FALSE}
+```{r message=FALSE, warning=FALSE}
 sortAndGraph <- function(column, name, color) {
   # Convert column to table
   injury_by_col <- table(column)
@@ -144,7 +144,7 @@ sortAndGraph <- function(column, name, color) {
 city_plot <- sortAndGraph(injury_data$City, 'City', rgb(0.6, 0.5, 0.7))
 employer_plot <- sortAndGraph(injury_data$Employer, 'Employer', rgb(1, 0.5, 0.7))
 ```
-```{r include=FALSE}
+```{r message=FALSE, warning=FALSE}
 library(gridExtra)
 ```
 ```{r}
